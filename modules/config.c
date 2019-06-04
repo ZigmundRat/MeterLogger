@@ -24,8 +24,8 @@ SAVE_FLAG saveFlag;
 static os_timer_t config_save_timer;
 char config_save_timer_running;
 
-void ICACHE_FLASH_ATTR
-cfg_save() {
+bool ICACHE_FLASH_ATTR
+cfg_save(uint16_t *calculated_crc, uint16_t *saved_crc) {
 #ifdef IMPULSE
 	uint32_t impulse_meter_count_temp;
 #endif // IMPULSE
@@ -70,7 +70,18 @@ cfg_save() {
 	// calculate checksum on sys_cfg struct without ccit_crc16
 	sys_cfg.ccit_crc16 = ccit_crc16(0xffff, (uint8_t *)&sys_cfg, offsetof(syscfg_t, ccit_crc16) - offsetof(syscfg_t, cfg_holder));
 	system_param_save_with_protect(CFG_LOCATION, &sys_cfg, sizeof(syscfg_t));
+	
+	// check for flash memory error
+	if (calculated_crc && saved_crc) {	// check if return values was requested
+		*saved_crc = sys_cfg.ccit_crc16;
+		cfg_load();	// reload saved config
+		*calculated_crc = ccit_crc16(0xffff, (uint8_t *)&sys_cfg, offsetof(syscfg_t, ccit_crc16) - offsetof(syscfg_t, cfg_holder));
+		if (*calculated_crc != *saved_crc) {
+			return false;
+		}
+	}
 #endif	// IMPULSE
+	return true;
 }
 
 void ICACHE_FLASH_ATTR
@@ -94,7 +105,7 @@ cfg_load() {
 	// if checksum fails...
 	if (sys_cfg.ccit_crc16 != ccit_crc16(0xffff, (uint8_t *)&sys_cfg, offsetof(syscfg_t, ccit_crc16) - offsetof(syscfg_t, cfg_holder))) {
 #ifdef DEBUG
-		os_printf("config crc error, default conf loaded\n");
+		printf("config crc error, default conf loaded\n");
 #endif // DEBUG
 		// if first time config load default conf
 		os_memset(&sys_cfg, 0x00, sizeof(syscfg_t));
@@ -126,16 +137,18 @@ cfg_load() {
 #else
 		sys_cfg.ac_thermo_state = 0;
 		sys_cfg.offline_close_at = 0;
+#ifndef NO_CRON
 		memset(&sys_cfg.cron_jobs, 0, sizeof(cron_job_t));
+#endif	// NO_CRON
 #endif	// IMPULSE
 
 		INFO(" default configuration\r\n");
 
-		cfg_save();
+		cfg_save(NULL, NULL);
 	}
 	else {
 #ifdef DEBUG
-		os_printf("config crc ok\n");
+		printf("config crc ok\n");
 #endif // DEBUG
 	}
 }
@@ -147,7 +160,7 @@ cfg_save_defered() {
 	os_timer_arm(&config_save_timer, SAVE_DEFER_TIME, 0);
 }
 
-void ICACHE_FLASH_ATTR cfg_save_ssid_pwd(char *ssid_pwd) {
+bool ICACHE_FLASH_ATTR cfg_save_ssid_pwd(char *ssid_pwd, uint16_t *calculated_crc, uint16_t *saved_crc) {
 	// for parsing query string formatted parameters
 	char *str;
 	char *query_string_key, *query_string_value;
@@ -202,7 +215,7 @@ void ICACHE_FLASH_ATTR cfg_save_ssid_pwd(char *ssid_pwd) {
 		}
 		str = strtok_r(NULL, "&", &context_query_string);
 	}
-	cfg_save();
+	return cfg_save(calculated_crc, saved_crc);
 }
 
 ICACHE_FLASH_ATTR
@@ -218,6 +231,6 @@ void config_save_timer_func(void *arg) {
 		os_timer_disarm(&config_save_timer);
 		config_save_timer_running = 0;
 
-		cfg_save();		
+		cfg_save(NULL, NULL);		
 	}
 }

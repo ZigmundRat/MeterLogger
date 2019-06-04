@@ -66,6 +66,12 @@ meter is forced to run as a flow meter and close when volume is reached
 AUTO_CLOSE=1  
 automatically check if energy is larger than the value set by open_until mqtt command 
   
+DEBUG_STACK_TRACE=1  
+Enable exception stack trace dump at to flash at address STACK_TRACE_SEC * SPI_FLASH_SEC_SIZE (0x80000), STACK_TRACE_N bytes  
+
+NO_CRON=1  
+disable cron stuff and save 2688 bytes of RAM. Reconfiguration is needed after changing this  
+
 THERMO_NO=0  
 thermo actuator is normal closed  
   
@@ -83,9 +89,56 @@ serial number for meter used for device's SSID: IMPULSE meters EL_9999999 and ot
 
 KEY=ef500c9268cf749016d26d6cbfaaf7bf
 master key for crypto, 16 bytes
-Fist 8 bytes hex encoded (ef500c9268cf7490) is wifi setup password. Master key is sha256 hashed to 32 bit and first first 16 bytes is aes key and last 16 bytes is hmac sha256 key.
+First 8 bytes hex encoded (ef500c9268cf7490) is wifi setup password. Master key is sha256 hashed to 32 bit and first 16 bytes is aes key and last 16 bytes is hmac sha256 key.
 
-Crypto is applies on mqtt packages like: first 32 bytes of mqtt_message contains hmac sha256, next 16 bytes contains IV last part is aes encrypted data
+```  
+master key                            wifi key (first 16 bytes)
++--------------------------------+    +----------------+
+|ef500c9268cf749016d26d6cbfaaf7bf| -> |ef500c9268cf7490| 
++--------------------------------+    +----------------+
+                |
+          [sha256 hash]
+                |
+                v
++----------------------------------------------------------------+
+|89a5d4f82ad86bc9ec27427e246fd15481663afea8c463d93cc93c967c9b31be|
++----------------------------------------------------------------+
+                |                                        |
+aes key         v                   hmac sha256 key      v
++--------------------------------+  +--------------------------------+
+|89a5d4f82ad86bc9ec27427e246fd154|  |81663afea8c463d93cc93c967c9b31be|
++--------------------------------+  +--------------------------------+
+
+```  
+
+Crypto is applies on mqtt packages like this:
+1) at 32 bytes offset in mqtt_message contains IV, 16 bytes random bytes used for AES128 CBC encryption.
+
+2) cleartext (0-terminated) is AES128 CBC encrypted, with aes key and IV. Result is written to mqtt_message at 32 + 16 bytes offset (binary data not 0-terminated).
+
+3) HMAC SHA256 checksum is calculated on topic + IV + encrypted data and written to first 32 bytes.
+
+```  
+hmac sha256                                                       IV                               encrypted data
++----------------------------------------------------------------+--------------------------------+------------------------------------+
+|b218d7ec2f7977c942b5bf16d535de3cb5f0e012638148e5a7fc6e09efe440a7|54cd3d04f024e7e5c4876248cc146c41|9616bb291182861b7a5ea238a0c267115...|
++--------------------------------------------------------------------------------------------------------------------------------------+
+
+
+IV
++--------------------------------+
+|54cd3d04f024e7e5c4876248cc146c41| 
++--------------------------------+
+
+cleartext message (null terminated)
++-----------------------------------------------------------------------------------------------------------------+
+|heap=21376&t1=23.61 C&t2=22.19 C&tdif=1.42 K&flow1=0 l/h&effect1=0.0 kW&hr=73327 h&v1=1321.27 m3&e1=56.726 MWh&\0|
++-----------------------------------------------------------------------------------------------------------------+
+
++
+
+hmac sha256 key
+```  
 
 AP=1
 enable wireless extender; wireless AP
@@ -97,8 +150,8 @@ enables open source lwip and uses more memory so mqtt buffer is smaller when thi
 | :----------------------------------------------------- | :-------------------------------------------------------------------------------------------------- |
 | /config/v2/9999999/[unix time]/ping                    |                                                                                                     |
 | /config/v2/9999999/[unix time]/open                    | [unix time]                                                                                         |
-| /config/v2/9999999/[unix time]/open_until              | [kWh when meter should close]                                                                       |
-| /config/v2/9999999/[unix time]/open_until_delta        | [[kWh when meter should close as delta]                                                             |
+| /config/v2/9999999/[unix time]/open_until              | [kWh when meter should close (only write to flash if changed and not negative value)]               |
+| /config/v2/9999999/[unix time]/open_until_delta        | [[kWh when meter should close as delta (only write to flash if changed and not negative value)]     |
 | /config/v2/9999999/[unix time]/close                   | [unix time]                                                                                         |
 | /config/v2/9999999/[unix time]/status                  |                                                                                                     |
 | /config/v2/9999999/[unix time]/set_cron                | minute=30&hour=*&day_of_month=*&month=*&day_of_week=*&command=open                                  |
@@ -110,6 +163,7 @@ enables open source lwip and uses more memory so mqtt buffer is smaller when thi
 | /config/v2/9999999/[unix time]/ping                    |                                                                                                     |
 | /config/v2/9999999/[unix time]/version                 |                                                                                                     |
 | /config/v2/9999999/[unix time]/uptime                  |                                                                                                     |
+| /config/v2/9999999/[unix time]/stack_trace             | [enable stack trace dumps until restart i.e. once (only if built with DEBUG_STACK_TRACE=1)]         |
 | /config/v2/9999999/[unix time]/vdd                     |                                                                                                     |
 | /config/v2/9999999/[unix time]/rssi                    |                                                                                                     |
 | /config/v2/9999999/[unix time]/ssid                    |                                                                                                     |
@@ -138,6 +192,7 @@ enables open source lwip and uses more memory so mqtt buffer is smaller when thi
 | /open_until/v2/9999999/[unix time]              | [kWh when meter should close]                                                                        |
 | /open_until_delta/v2/9999999/[unix time]        | [kWh when meter should close]                                                                        |
 | /uptime/v2/9999999/[unix time]                  | [uptime in seconds]                                                                                  |
+| /stack_trace/v2/9999999/[unix time]             |                                                                                                      |
 | /vdd/v2/9999999/[unix time]                     | [power supply voltage level]                                                                         |
 | /rssi/v2/9999999/[unix time]                    | [rssi of the wifi it is connected to (in dBm, 31 if fail)]                                           |
 | /ssid/v2/9999999/[unix time]                    | [ssid of the wifi it is connected to]                                                                |

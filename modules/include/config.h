@@ -60,7 +60,9 @@ typedef struct{
 #ifndef IMPULSE
 	uint8_t ac_thermo_state;	// thermo actuator state
 	uint32_t offline_close_at;	// close thermo actuator at kwh set via mqtt open_at_delta function
+#ifndef NO_CRON
 	cron_jobs_t cron_jobs;
+#endif	// NO_CRON
 #else
 	char impulse_meter_serial[METER_SERIAL_LEN];
 	char impulse_meter_energy[32 + 1];	// in Wh
@@ -75,10 +77,10 @@ typedef struct {
     uint8 pad[3];
 } SAVE_FLAG;
 
-void ICACHE_FLASH_ATTR cfg_save();
+bool ICACHE_FLASH_ATTR cfg_save(uint16_t *calculated_crc, uint16_t *saved_crc);
 void ICACHE_FLASH_ATTR cfg_load();
 void ICACHE_FLASH_ATTR cfg_save_defered();
-void ICACHE_FLASH_ATTR cfg_save_ssid_pwd(char *ssid_pwd);
+bool ICACHE_FLASH_ATTR cfg_save_ssid_pwd(char *ssid_pwd, uint16_t *calculated_crc, uint16_t *saved_crc);
 ICACHE_FLASH_ATTR void config_save_timer_func(void *arg);
 
 extern syscfg_t sys_cfg;

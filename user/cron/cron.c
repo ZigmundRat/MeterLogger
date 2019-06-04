@@ -1,3 +1,5 @@
+#ifndef NO_CRON
+
 #include <esp8266.h>
 
 #include <time.h>
@@ -7,6 +9,7 @@
 #include "config.h"
 #include "mqtt.h"
 #include "wifi.h"
+#include "user_main.h"
 
 static os_timer_t minute_timer;
 char sec_drift;
@@ -24,6 +27,9 @@ void static minute_timer_func(void *arg) {
 	bool dst = false;
 	int previous_sunday;
 	int s;
+
+	uint16_t calculated_crc;
+	uint16_t saved_crc;
 
 	if (get_unix_time() == 0) {
 #ifdef DEBUG
@@ -211,7 +217,9 @@ void static minute_timer_func(void *arg) {
 				ac_thermo_close();
 			}
 			else if (strncmp(sys_cfg.cron_jobs.cron_job_list[i].command, "set_ssid_pwd", COMMAND_L) == 0) {
-				cfg_save_ssid_pwd(sys_cfg.cron_jobs.cron_job_list[i].command_params);
+				if (!cfg_save_ssid_pwd(sys_cfg.cron_jobs.cron_job_list[i].command_params, &calculated_crc, &saved_crc)) {
+					mqtt_flash_error(calculated_crc, saved_crc);
+				}
 			}
 			else if (strncmp(sys_cfg.cron_jobs.cron_job_list[i].command, "reconnect", COMMAND_L) == 0) {
 				// reconnect with new password
@@ -230,7 +238,7 @@ void static minute_timer_func(void *arg) {
 					// ...and save setting to flash if changed
 					if (sys_cfg.ap_enabled == false) {
 						sys_cfg.ap_enabled = true;
-						cfg_save();
+						cfg_save(NULL, NULL);
 					}
 				}
 			}
@@ -242,7 +250,7 @@ void static minute_timer_func(void *arg) {
 					// ...and save setting to flash if changed
 					if (sys_cfg.ap_enabled == true) {
 						sys_cfg.ap_enabled = false;
-						cfg_save();
+						cfg_save(NULL, NULL);
 					}
 				}
 			}
@@ -379,3 +387,5 @@ void debug_cron_jobs() {
 	}
 }
 #endif
+
+#endif	// NO_CRON

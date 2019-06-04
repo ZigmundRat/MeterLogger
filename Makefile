@@ -78,11 +78,13 @@ else
 
 	CCFLAGS += -Os -ffunction-sections -fno-jump-tables
 	AR = xtensa-lx106-elf-ar
+	AS = xtensa-lx106-elf-as
 	CC = xtensa-lx106-elf-gcc
 	LD = xtensa-lx106-elf-gcc
 	NM = xtensa-lx106-elf-nm
 	CPP = xtensa-lx106-elf-cpp
 	OBJCOPY = xtensa-lx106-elf-objcopy
+	OBJDUMP = xtensa-lx106-elf-objdump
 	SIZE = xtensa-lx106-elf-size
     UNAME_S := $(shell uname -s)
 
@@ -107,7 +109,7 @@ endif
 
 # which modules (subdirectories) of the project to include in compiling
 MODULES		= driver mqtt modules user user/crypto
-EXTRA_INCDIR    = . include $(SDK_BASE)/../include $(HOME)/esp8266/esp-open-sdk/sdk/include $(SDK_BASE)/../esp-open-lwip/include include lib/heatshrink user/crypto user/kamstrup user/61107
+EXTRA_INCDIR    = . include $(SDK_BASE)/../include $(SDK_BASE)/../lx106-hal/include $(HOME)/esp8266/esp-open-sdk/sdk/include $(SDK_BASE)/../esp-open-lwip/include include lib/heatshrink user/crypto user/kamstrup user/61107
 
 # libraries used in this project, mainly provided by the SDK
 LIBS	= main net80211 wpa pp phy hal ssl gcc c
@@ -117,7 +119,7 @@ else
     LIBS	+= lwip
 endif
 # compiler flags using during compilation of source files
-CFLAGS	= -Os -Wpointer-arith -Wundef -Wall -Wno-pointer-sign -Wno-comment -Wno-switch -Wno-unknown-pragmas -Wl,-EL -fno-inline-functions -nostdlib -mlongcalls -mtext-section-literals  -D__ets__ -DICACHE_FLASH -DVERSION=\"$(GIT_VERSION)\" -DECB=0 -DKEY=$(CUSTOM_KEY) -DAP_PASSWORD=\"$(CUSTOM_AP_PASSWORD)\" -mforce-l32 -DMEMLEAK_DEBUG
+CFLAGS	= -Os -Wpointer-arith -Wundef -Wall -Wno-pointer-sign -Wno-comment -Wno-switch -Wno-unknown-pragmas -Wl,-EL -fno-inline-functions -nostdlib -mlongcalls -mtext-section-literals  -D__ets__ -DICACHE_FLASH -DVERSION=\"$(GIT_VERSION)\" -DECB=0 -DKEY=$(CUSTOM_KEY) -DAP_PASSWORD=\"$(CUSTOM_AP_PASSWORD)\" -mforce-l32 -DMEMLEAK_DEBUG -DCONFIG_ENABLE_IRAM_MEMORY=1
 ifeq ($(AP), 1)
     CFLAGS	+= -DLWIP_OPEN_SRC
 endif
@@ -156,6 +158,10 @@ ifeq ($(DEBUG_SHORT_WEB_CONFIG_TIME), 1)
     CFLAGS += -DDEBUG_SHORT_WEB_CONFIG_TIME
 endif
 
+ifneq ($(DEBUG_STACK_TRACE), 0)
+    CFLAGS += -DDEBUG_STACK_TRACE
+endif
+
 ifeq ($(MC_66B), 1)
     EN61107 = 1
 	CFLAGS += -DMC_66B -DEN61107
@@ -180,6 +186,10 @@ endif
 
 ifneq ($(AUTO_CLOSE), 0)
     CFLAGS += -DAUTO_CLOSE=1
+endif
+
+ifeq ($(NO_CRON), 1)
+    CFLAGS += -DNO_CRON=1
 endif
 
 ifeq ($(THERMO_NO), 1)
@@ -217,8 +227,11 @@ BUILD_DIR	:= $(addprefix $(BUILD_BASE)/,$(MODULES))
 SDK_LIBDIR	:= $(addprefix $(SDK_BASE)/,$(SDK_LIBDIR))
 SDK_INCDIR	:= $(addprefix -I$(SDK_BASE)/,$(SDK_INCDIR))
 
-SRC		:= $(foreach sdir,$(SRC_DIR),$(wildcard $(sdir)/*.c))
-OBJ		:= $(patsubst %.c,$(BUILD_BASE)/%.o,$(SRC))
+AS_SRC		:= $(foreach sdir,$(SRC_DIR),$(wildcard $(sdir)/*.S)) 
+C_SRC		:= $(foreach sdir,$(SRC_DIR),$(wildcard $(sdir)/*.c)) 
+AS_OBJ		:= $(patsubst %.S,%.o,$(AS_SRC))
+C_OBJ		:= $(patsubst %.c,%.o,$(C_SRC))
+OBJ			:= $(patsubst %.o,$(BUILD_BASE)/%.o,$(AS_OBJ) $(C_OBJ))
 LIBS		:= $(addprefix -l,$(LIBS))
 APP_AR		:= $(addprefix $(BUILD_BASE)/,$(TARGET)_app.a)
 TARGET_OUT	:= $(addprefix $(BUILD_BASE)/,$(TARGET).out)
@@ -241,9 +254,13 @@ Q := @
 vecho := @echo
 endif
 
+vpath %.S $(SRC_DIR)
 vpath %.c $(SRC_DIR)
 
 define compile-objects
+$1/%.o: %.S
+	$(vecho) "ASM $$<"
+	$(Q) $(CC) $(INCDIR) $(MODULE_INCDIR) $(EXTRA_INCDIR) $(SDK_INCDIR) $(CFLAGS) -D__ASSEMBLER__ -c $$< -o $$@
 $1/%.o: %.c
 	$(vecho) "CC $$<"
 	$(Q) $(CC) $(INCDIR) $(MODULE_INCDIR) $(EXTRA_INCDIR) $(SDK_INCDIR) $(CFLAGS)  -c $$< -o $$@
@@ -305,6 +322,14 @@ flash107th_bit_0xff:
 size:
 	$(SIZE) -A -t -d $(APP_AR) | tee $(BUILD_BASE)/../app_app.size
 	$(SIZE) -B -t -d $(APP_AR) | tee $(BUILD_BASE)/../app_app.size
+
+getstacktrace:
+	$(ESPTOOL) -p $(ESPPORT) -b $(BAUDRATE) read_flash 0x80000 0x4000 firmware/stack_trace.dump
+	
+stacktracedecode:
+	test -s build/app.out || echo "Need to make all first" && exit
+	test -s firmware/stack_trace.dump || echo "Need to make getstacktrace first" && exit
+	java -jar /meterlogger/EspStackTraceDecoder.jar /meterlogger/esp-open-sdk/xtensa-lx106-elf/bin/xtensa-lx106-elf-addr2line build/app.out firmware/stack_trace.dump
 
 screen:
 	screen /dev/ttyUSB0 $(DEBUG_SPEED),cstopb

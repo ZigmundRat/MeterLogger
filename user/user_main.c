@@ -76,6 +76,15 @@ bool check_memleak_debug_enable(void) {
 }
 #endif
 
+#if ESP_SDK_VERSION == 030300
+#ifdef CONFIG_ENABLE_IRAM_MEMORY
+//ICACHE_FLASH_ATTR
+uint32 user_iram_memory_is_enabled(void) {
+	return  CONFIG_ENABLE_IRAM_MEMORY;
+}
+#endif	// CONFIG_ENABLE_IRAM_MEMORY
+#endif
+
 ICACHE_FLASH_ATTR void static sample_mode_timer_func(void *arg) {
 	unsigned char topic[MQTT_TOPIC_L];
 	// temp var for serial string
@@ -83,6 +92,8 @@ ICACHE_FLASH_ATTR void static sample_mode_timer_func(void *arg) {
 #ifdef IMPULSE
 	uint32_t impulse_meter_count_temp;
 #endif // IMPULSE
+	uint16_t calculated_crc;
+	uint16_t saved_crc;
 	
 	led_stop_pattern();	// stop indicating config mode mode with led
 
@@ -114,7 +125,9 @@ ICACHE_FLASH_ATTR void static sample_mode_timer_func(void *arg) {
 	if (strncmp(sys_cfg.device_id, meter_serial_temp, 16 - 1) != 0) {
 		memset(sys_cfg.device_id, 0, sizeof(sys_cfg.device_id));
 		tfp_snprintf(sys_cfg.device_id, 16, "%s", meter_serial_temp);
-		cfg_save();
+		if (!cfg_save(&calculated_crc, &saved_crc)) {
+			mqtt_flash_error(calculated_crc, saved_crc);
+		}
 	}
 	
 	MQTT_InitConnection(&mqtt_client, sys_cfg.mqtt_host, sys_cfg.mqtt_port, sys_cfg.security);
@@ -283,8 +296,12 @@ ICACHE_FLASH_ATTR void static kmp_request_send_timer_func(void *arg) {
 ICACHE_FLASH_ATTR void static impulse_meter_calculate_timer_func(void *arg) {
 	uint32_t impulse_time_diff;
 	uint32_t impulse_meter_count_diff;
+	uint16_t calculated_crc;
+	uint16_t saved_crc;
 
-	cfg_save();
+	if (!cfg_save(&calculated_crc, &saved_crc)) {
+		mqtt_flash_error(calculated_crc, saved_crc);
+	}
 	
 	impulse_time = get_uptime();
 	impulse_time_diff = impulse_time - last_impulse_time;
@@ -501,9 +518,6 @@ ICACHE_FLASH_ATTR void static mqtt_connected_defer_timer_func(void *arg) {
 
 ICACHE_FLASH_ATTR void mqtt_connected_cb(uint32_t *args) {
 	unsigned char mqtt_topic[MQTT_TOPIC_L];
-	char mqtt_message[MQTT_MESSAGE_L];
-	uint8_t cleartext[MQTT_MESSAGE_L];
-	int mqtt_message_l;
 
 #ifdef EN61107
 	if (en61107_get_received_serial() == 0) {
@@ -531,58 +545,18 @@ ICACHE_FLASH_ATTR void mqtt_connected_cb(uint32_t *args) {
 	MQTT_Subscribe(&mqtt_client, mqtt_topic, 0);
 	
 	// send mqtt version
-	// clear data
-	memset(mqtt_topic, 0, sizeof(mqtt_topic));
-	memset(mqtt_message, 0, sizeof(mqtt_message));
-	memset(cleartext, 0, sizeof(cleartext));
-#ifdef EN61107
-	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/version/v2/%07u/%u", en61107_get_received_serial(), get_unix_time());
-#elif defined IMPULSE
-	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/version/v2/%s/%u", sys_cfg.impulse_meter_serial, get_unix_time());
-#else
-	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/version/v2/%07u/%u", kmp_get_received_serial(), get_unix_time());
-#endif
-	tfp_snprintf(cleartext, MQTT_MESSAGE_L, "%s-%s-%s", system_get_sdk_version(), VERSION, HW_MODEL);
-
-	// encrypt and send
-	mqtt_message_l = encrypt_aes_hmac_combined(mqtt_message, mqtt_topic, strlen(mqtt_topic), cleartext, strlen(cleartext) + 1);
-	MQTT_Publish(&mqtt_client, mqtt_topic, mqtt_message, mqtt_message_l, 2, 0);	// QoS level 2
+	mqtt_rpc_version(&mqtt_client);
 
 	// send mqtt uptime
-	// clear data
-	memset(mqtt_topic, 0, sizeof(mqtt_topic));
-	memset(mqtt_message, 0, sizeof(mqtt_message));
-	memset(cleartext, 0, sizeof(cleartext));
-	
-#ifdef EN61107
-	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/uptime/v2/%07u/%u", en61107_get_received_serial(), get_unix_time());
-#elif defined IMPULSE
-	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/uptime/v2/%s/%u", sys_cfg.impulse_meter_serial, get_unix_time());
-#else
-	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/uptime/v2/%07u/%u", kmp_get_received_serial(), get_unix_time());
-#endif
-	tfp_snprintf(cleartext, MQTT_MESSAGE_L, "%u", get_uptime());
-	// encrypt and send
-	mqtt_message_l = encrypt_aes_hmac_combined(mqtt_message, mqtt_topic, strlen(mqtt_topic), cleartext, strlen(cleartext) + 1);
-	MQTT_Publish(&mqtt_client, mqtt_topic, mqtt_message, mqtt_message_l, 2, 0);	// QoS level 2
+	mqtt_rpc_uptime(&mqtt_client);
 
 #ifndef IMPULSE
 	// send mqtt status
-	// clear data
-	memset(mqtt_topic, 0, sizeof(mqtt_topic));
-	memset(mqtt_message, 0, sizeof(mqtt_message));
-	memset(cleartext, 0, sizeof(cleartext));
-
-#ifdef EN61107
-	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/status/v2/%07u/%u", en61107_get_received_serial(), get_unix_time());
-#else
-	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/status/v2/%07u/%u", kmp_get_received_serial(), get_unix_time());
-#endif
-	tfp_snprintf(cleartext, MQTT_MESSAGE_L, "%s", sys_cfg.ac_thermo_state ? "open" : "close");
-	// encrypt and send
-	mqtt_message_l = encrypt_aes_hmac_combined(mqtt_message, mqtt_topic, strlen(mqtt_topic), cleartext, strlen(cleartext) + 1);
-	MQTT_Publish(&mqtt_client, mqtt_topic, mqtt_message, mqtt_message_l, 2, 0);	// QoS level 2
+	mqtt_rpc_status(&mqtt_client);
 #endif	
+
+	// send mqtt reset_reason
+	mqtt_rpc_reset_reason(&mqtt_client);
 
 	// set mqtt_client kmp_request should use to return data
 #ifdef EN61107
@@ -761,7 +735,14 @@ ICACHE_FLASH_ATTR void mqtt_data_cb(uint32_t *args, const char* topic, uint32_t 
 		// found reset_reason
 		mqtt_rpc_reset_reason(&mqtt_client);
 	}
+#ifdef DEBUG_STACK_TRACE
+	else if (strncmp(function_name, "stack_trace", FUNCTIONNAME_L) == 0) {
+		// found stack_trace
+		mqtt_rpc_stack_trace(&mqtt_client);
+	}
+#endif	// DEBUG_STACK_TRACE
 #ifndef IMPULSE
+#ifndef NO_CRON
 	else if (strncmp(function_name, "set_cron", FUNCTIONNAME_L) == 0) {
 		// found set_cron
 		mqtt_rpc_set_cron(&mqtt_client, cleartext);
@@ -774,6 +755,7 @@ ICACHE_FLASH_ATTR void mqtt_data_cb(uint32_t *args, const char* topic, uint32_t 
 		// found cron
 		mqtt_rpc_cron(&mqtt_client);
 	}
+#endif	// NO_CRON
 	else if (strncmp(function_name, "open", FUNCTIONNAME_L) == 0) {
 		// found open
 		mqtt_rpc_open(&mqtt_client);
@@ -985,6 +967,14 @@ ICACHE_FLASH_ATTR void user_init(void) {
 	printf("\t(DEBUG_SHORT_WEB_CONFIG_TIME)\n\r");
 #endif
 
+#ifdef NO_CRON
+	printf("\t(NO_CRON)\n\r");
+#endif
+	
+#ifdef DEBUG_STACK_TRACE
+	printf("\t(DEBUG_STACK_TRACE)\n\r");
+#endif
+
 #ifdef FORCED_FLOW_METER
 	printf("\t(FORCED_FLOW_METER)\n\r");
 #endif
@@ -1051,7 +1041,9 @@ ICACHE_FLASH_ATTR void user_init(void) {
 #else	
 	user_gpio_init();
 	ac_out_init();
+#ifndef NO_CRON
 	cron_init();
+#endif	// NO_CRON
 #endif // IMPULSE
 
 	led_init();
@@ -1067,7 +1059,7 @@ ICACHE_FLASH_ATTR void user_init(void) {
 #endif // IMPULSE
 	
 	// dont enable wireless before we have configured ssid
-//	wifi_set_opmode_current(NULL_MODE);
+	wifi_set_opmode_current(NULL_MODE);
 	wifi_station_disconnect();
 	// disale auto connect, we handle reconnect with this event handler
 	wifi_station_set_auto_connect(0);
@@ -1127,3 +1119,36 @@ ICACHE_FLASH_ATTR void system_init_done(void) {
 #endif
 }
 
+ICACHE_FLASH_ATTR void mqtt_flash_error(uint16_t calculated_crc, uint16_t saved_crc) {
+	char mqtt_topic[MQTT_TOPIC_L];
+	char mqtt_message[MQTT_MESSAGE_L];
+	int mqtt_message_l;	
+	// vars for aes encryption
+	uint8_t cleartext[MQTT_MESSAGE_L];
+
+#ifdef DEBUG
+	printf("config crc error when saving, possible flash memory error calculated_crc=0x%x&saved_crc=0x%x\n\r", calculated_crc, saved_crc);
+#endif // DEBUG
+
+	// clear data
+	memset(mqtt_topic, 0, sizeof(mqtt_topic));
+	memset(mqtt_message, 0, sizeof(mqtt_message));
+	memset(cleartext, 0, sizeof(cleartext));
+
+#ifdef EN61107
+	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/flash_error/v2/%07u/%u", en61107_get_received_serial(), get_unix_time());
+#elif defined IMPULSE
+	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/flash_error/v2/%s/%u", sys_cfg.impulse_meter_serial, get_unix_time());
+#else
+	tfp_snprintf(mqtt_topic, MQTT_TOPIC_L, "/flash_error/v2/%07u/%u", kmp_get_received_serial(), get_unix_time());
+#endif
+	tfp_snprintf(cleartext, MQTT_MESSAGE_L, "calculated_crc=0x%x&saved_crc=0x%x", calculated_crc, saved_crc);
+
+	// encrypt and send
+	mqtt_message_l = encrypt_aes_hmac_combined(mqtt_message, mqtt_topic, strlen(mqtt_topic), cleartext, strlen(cleartext) + 1);
+
+	if (mqtt_client.pCon != NULL) {
+		// if mqtt_client is initialized
+		MQTT_Publish(&mqtt_client, mqtt_topic, mqtt_message, mqtt_message_l, 2, 0);	// QoS level 2
+	}
+}
