@@ -59,8 +59,10 @@ bool parse_en61107_frame(en61107_response_t *response, char *frame, unsigned int
 					pos = strstr(frame, stx);			   // find position of stx char
 					if (pos != NULL) {							  // if found stx char...
 						length = pos - frame;			   // ...save meter_type string
-						// DEBUG: check if length - 3 is >= 0
-						memcpy(response->meter_type, frame + 1, length - 3);	// DEBUG: check bounds
+						if (((length - 3) > EN61107_METER_TYPE_L) || ((length - 3) <= 0)) {	// check bounds
+							return false;
+						}
+						memcpy(response->meter_type, frame + 1, length - 3);
 						// detect meter type and protocol from returned meter type
 						frame += length + 3;
 					}
@@ -97,7 +99,7 @@ bool parse_en61107_frame(en61107_response_t *response, char *frame, unsigned int
 						pos = strstr(rid_value_unit_string_ptr, "*");
 						if (pos != NULL) {
 							value_string_length = pos - rid_value_unit_string_ptr;
-							cleanup_decimal_str(rid_value_unit_string_ptr, decimal_str, value_string_length);
+							cleanup_decimal_str(rid_value_unit_string_ptr, decimal_str, value_string_length + 1);
 							en61107_response_set_value(response, rid, decimal_str, strlen(decimal_str));
 							rid_value_unit_string_ptr += value_string_length + 1;
 						}
@@ -141,7 +143,7 @@ bool parse_en61107_frame(en61107_response_t *response, char *frame, unsigned int
 					pos = strstr(rid_value_unit_string_ptr, "*");
 					if (pos != NULL) {
 						value_string_length = pos - rid_value_unit_string_ptr;
-						cleanup_decimal_str(rid_value_unit_string_ptr, decimal_str, value_string_length);
+						cleanup_decimal_str(rid_value_unit_string_ptr, decimal_str, value_string_length + 1);
 						en61107_response_set_value(response, rid, decimal_str, strlen(decimal_str));
 						rid_value_unit_string_ptr += value_string_length + 1;
 					}
@@ -198,7 +200,7 @@ bool parse_mc66cde_standard_data_1_frame(en61107_response_t *response, char *fra
 				tfp_snprintf(response->effect1.unit, EN61107_UNIT_L, "%s", "kW");
 				break;
 			case 7:
-				cleanup_decimal_str(p, decimal_str, strlen(p));
+				cleanup_decimal_str(p, decimal_str, strlen(p) + 1);
 				tfp_snprintf(response->flow1.value, EN61107_VALUE_L, "%s", decimal_str);
 				tfp_snprintf(response->flow1.unit, EN61107_UNIT_L, "%s", "l/h");
 				break;

@@ -120,7 +120,7 @@ static void en61107_received_task(os_event_t *events) {
 			// get message buffer
 			memset(message, 0, sizeof(message));
 			i = 0;
-			while (en61107_fifo_get(&c) && (i <= EN61107_FRAME_L)) {
+			while (en61107_fifo_get(&c) && (i < EN61107_FRAME_L)) {
 				message[i++] = c;
 			}
 			message_l = i;
@@ -144,7 +144,7 @@ static void en61107_received_task(os_event_t *events) {
 			// get message buffer
 			memset(message, 0, sizeof(message));
 			i = 0;
-			while (en61107_fifo_get(&c) && (i <= EN61107_FRAME_L)) {
+			while (en61107_fifo_get(&c) && (i < EN61107_FRAME_L)) {
 				message[i++] = c;
 			}
 			message_l = i;
@@ -161,7 +161,7 @@ static void en61107_received_task(os_event_t *events) {
 			// get message buffer
 			memset(message, 0, sizeof(message));
 			i = 0;
-			while (en61107_fifo_get(&c) && (i <= EN61107_FRAME_L)) {
+			while (en61107_fifo_get(&c) && (i < EN61107_FRAME_L)) {
 				message[i++] = c;
 			}
 			message_l = i;
@@ -178,7 +178,7 @@ static void en61107_received_task(os_event_t *events) {
 			// get message buffer
 			memset(message, 0, sizeof(message));
 			i = 0;
-			while (en61107_fifo_get(&c) && (i <= EN61107_FRAME_L)) {
+			while (en61107_fifo_get(&c) && (i < EN61107_FRAME_L)) {
 				message[i++] = c;
 			}
 			message_l = i;
@@ -220,7 +220,7 @@ static void en61107_received_task(os_event_t *events) {
 					);
 					strcat(message, key_value);
 
-#ifndef FORCED_FLOW_METER
+#ifndef FLOW_METER
 					// heating meter specific
 					// flow temperature
 					tfp_snprintf(key_value, MQTT_TOPIC_L, "t1=%s %s&", response.t1.value, response.t1.unit);
@@ -239,17 +239,17 @@ static void en61107_received_task(os_event_t *events) {
 					// calculated temperature difference
 					tfp_snprintf(key_value, MQTT_TOPIC_L, "tdif=%s %s&", response.tdif.value, response.tdif.unit);
 					strcat(message, key_value);
-#endif	// FORCED_FLOW_METER
+#endif	// FLOW_METER
 
 					// flow
 					tfp_snprintf(key_value, MQTT_TOPIC_L, "flow1=%s %s&", response.flow1.value, response.flow1.unit);
 					strcat(message, key_value);
 
-#ifndef FORCED_FLOW_METER
+#ifndef FLOW_METER
 					// current power
 					tfp_snprintf(key_value, MQTT_TOPIC_L, "effect1=%s %s&", response.effect1.value, response.effect1.unit);
 					strcat(message, key_value);
-#endif	// FORCED_FLOW_METER
+#endif	// FLOW_METER
 
 					// hours
 					tfp_snprintf(key_value, MQTT_TOPIC_L, "hr=%s %s&", response.hr.value, response.hr.unit);
@@ -259,11 +259,11 @@ static void en61107_received_task(os_event_t *events) {
 					tfp_snprintf(key_value, MQTT_TOPIC_L, "v1=%s %s&", response.v1.value, response.v1.unit);
 					strcat(message, key_value);
 
-#ifndef FORCED_FLOW_METER
+#ifndef FLOW_METER
 					// power
 					tfp_snprintf(key_value, MQTT_TOPIC_L, "e1=%s %s&", response.e1.value, response.e1.unit);
 					strcat(message, key_value);
-#endif	// FORCED_FLOW_METER
+#endif	// FLOW_METER
 
 					memset(cleartext, 0, sizeof(cleartext));
 					os_strncpy(cleartext, message, sizeof(message));	// make a copy of message for later use
@@ -297,6 +297,8 @@ static void en61107_received_task(os_event_t *events) {
 
 ICACHE_FLASH_ATTR
 void en61107_request_init() {
+	unsigned int i;
+
 	fifo_head = 0;
 	fifo_tail = 0;
 
@@ -307,7 +309,20 @@ void en61107_request_init() {
 	en61107_request_num = 0;
 
 	en61107_etx_received = false;
-	
+
+	// wake up meter with 500 ms of null characters
+#ifdef EN61107
+	// BIT_RATE_300
+	for (i = 0; i < 16; i++) {
+		uart_tx_one_char(UART0, '\0');
+	}
+#else
+	// BIT_RATE_1200
+	for (i = 0; i < 60; i++) {
+		uart_tx_one_char(UART0, '\0');
+	}
+#endif
+
 	system_os_task(en61107_received_task, en61107_received_task_prio, en61107_received_task_queue, en61107_received_task_queue_length);
 }
 
@@ -328,10 +343,13 @@ uint32_t en61107_get_received_serial() {
 	return en61107_serial;
 }
 
-#ifdef FORCED_FLOW_METER
+#ifdef FLOW_METER
 ICACHE_FLASH_ATTR
-unsigned int en61107_get_received_volume_m3() {
-	return atoi(response.v1.value);
+unsigned int en61107_get_received_volume_l() {
+	char v1_l_string[64];
+	
+	multiply_str_by_1000(response.v1.value, v1_l_string);
+	return atoi(v1_l_string);
 }
 #else
 // helper function to pass energy to user_main.c
@@ -347,7 +365,7 @@ unsigned int en61107_get_received_energy_kwh() {
 		return atoi(response.e1.value);
 	}
 }
-#endif	// FORCED_FLOW_METER
+#endif	// FLOW_METER
 
 ICACHE_FLASH_ATTR
 void en61107_register_meter_sent_data_cb(meter_sent_data_cb cb) {
@@ -587,8 +605,8 @@ void en61107_uart_send_inst_values() {
 
 
 // fifo
-ICACHE_FLASH_ATTR
-unsigned int en61107_fifo_in_use() {
+//ICACHE_FLASH_ATTR
+inline unsigned int en61107_fifo_in_use() {
 	return fifo_head - fifo_tail;
 }
 
@@ -633,3 +651,9 @@ unsigned char en61107_fifo_snoop(unsigned char *c, unsigned int pos) {
 	}
 }
 
+ICACHE_FLASH_ATTR
+void en61107_request_destroy() {
+	os_timer_disarm(&en61107_receive_timeout_timer);
+	os_timer_disarm(&en61107_delayed_uart_change_setting_timer);
+	os_timer_disarm(&en61107_meter_wake_up_timer);
+}

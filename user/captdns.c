@@ -16,8 +16,6 @@ the internal webserver.
 */
 
 #include <esp8266.h>
-// open lwip networking
-#ifdef AP
 #include <lwip/ip.h>
 #include <lwip/udp.h>
 #include <lwip/tcp_impl.h>
@@ -27,9 +25,6 @@ the internal webserver.
 #include <lwip/dns.h>
 #include <lwip/app/dhcpserver.h>
 #include <lwip/opt.h>
-#else
-#include <ip_addr.h>
-#endif  // AP
 #include <espconn.h>
 
 #ifdef FREERTOS
@@ -43,6 +38,7 @@ the internal webserver.
 static int sockFd;
 #endif
 
+bool captdnsInitialized;
 
 #define DNS_LEN 512
 
@@ -348,10 +344,14 @@ void ICACHE_FLASH_ATTR captdnsInit(void) {
 	conn.proto.udp->local_port = 53;
 	espconn_regist_recvcb(&conn, captdnsRecv);
 	espconn_create(&conn);
+	captdnsInitialized = true;
 }
 
 void ICACHE_FLASH_ATTR captdnsStop(void) {
-	espconn_delete(&conn);
+	if (captdnsInitialized) {
+		espconn_delete(&conn);
+		captdnsInitialized = false;
+	}
 }
 
 #endif

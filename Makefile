@@ -33,7 +33,6 @@ FLAVOR ?= release
 GIT_VERSION := $(shell git rev-parse --abbrev-ref HEAD)-$(shell git rev-list HEAD --count)-$(shell git describe --abbrev=4 --dirty --always)
 CUSTOM_KEY = $(shell perl -e 'my $$key = qq[$(KEY)]; print(q["{ ] . join(q[, ], (map(qq[0x$$_], $$key =~ /(..)/g))) . q[ }"])')
 CUSTOM_AP_PASSWORD = $(shell perl -e 'print substr(qq[$(KEY)], 0, 16)')
-AP = 1
 
 #############################################################
 # Select compile
@@ -76,7 +75,7 @@ else
 	ESPPORT ?= /dev/ttyUSB0
 	SDK_BASE	?= $(HOME)/esp8266/esp-open-sdk/sdk
 
-	CCFLAGS += -Os -ffunction-sections -fno-jump-tables
+	CCFLAGS += -Os -ffunction-sections -fdata-sections -fno-jump-tables
 	AR = xtensa-lx106-elf-ar
 	AS = xtensa-lx106-elf-as
 	CC = xtensa-lx106-elf-gcc
@@ -107,34 +106,28 @@ else
 endif
 #############################################################
 
+GIT_LWIP_VERSION := $(shell cd $(SDK_BASE)/../esp-open-lwip ; git rev-parse --abbrev-ref HEAD)-$(shell cd $(SDK_BASE)/../esp-open-lwip ; git rev-list HEAD --count)-$(shell cd $(SDK_BASE)/../esp-open-lwip ; git describe --abbrev=4 --dirty --always)
+
 # which modules (subdirectories) of the project to include in compiling
 MODULES		= driver mqtt modules user user/crypto
 EXTRA_INCDIR    = . include $(SDK_BASE)/../include $(SDK_BASE)/../lx106-hal/include $(HOME)/esp8266/esp-open-sdk/sdk/include $(SDK_BASE)/../esp-open-lwip/include include lib/heatshrink user/crypto user/kamstrup user/61107
 
 # libraries used in this project, mainly provided by the SDK
-LIBS	= main net80211 wpa pp phy hal ssl gcc c
-ifeq ($(AP), 1)
-    LIBS	+= lwip_open
-else
-    LIBS	+= lwip
-endif
+LIBS	= main net80211 wpa pp phy hal ssl lwip_open gcc c
 # compiler flags using during compilation of source files
-CFLAGS	= -Os -Wpointer-arith -Wundef -Wall -Wno-pointer-sign -Wno-comment -Wno-switch -Wno-unknown-pragmas -Wl,-EL -fno-inline-functions -nostdlib -mlongcalls -mtext-section-literals  -D__ets__ -DICACHE_FLASH -DVERSION=\"$(GIT_VERSION)\" -DECB=0 -DKEY=$(CUSTOM_KEY) -DAP_PASSWORD=\"$(CUSTOM_AP_PASSWORD)\" -mforce-l32 -DMEMLEAK_DEBUG -DCONFIG_ENABLE_IRAM_MEMORY=1
-ifeq ($(AP), 1)
-    CFLAGS	+= -DLWIP_OPEN_SRC
-endif
+CFLAGS	= -Os -Wpointer-arith -Wundef -Wall -Wno-pointer-sign -Wno-comment -Wno-switch -Wno-unknown-pragmas -Wl,-EL -fno-inline-functions -nostdlib -mlongcalls -mtext-section-literals  -D__ets__ -DICACHE_FLASH -DVERSION=\"$(GIT_VERSION)\" -DLWIP_VERSION=\"$(GIT_LWIP_VERSION)\" -DECB=0 -DKEY=$(CUSTOM_KEY) -DAP_PASSWORD=\"$(CUSTOM_AP_PASSWORD)\" -mforce-l32 -DCONFIG_ENABLE_IRAM_MEMORY=1 -DLWIP_OPEN_SRC
 
 # linker flags used to generate the main object file
-LDFLAGS		= -nostdlib -Wl,--no-check-sections -u call_user_start -Wl,-static -Wl,-Map,app.map -Wl,--cref
+LDFLAGS		= -nostdlib -Wl,--no-check-sections -u call_user_start -Wl,-static -Wl,-Map,app.map -Wl,--cref -Wl,--gc-sections
 
 ifeq ($(FLAVOR),debug)
-    CFLAGS += -g -O0
-    LDFLAGS += -g -O0
+    CFLAGS += -g -O2
+    LDFLAGS += -g -O2
 endif
 
 ifeq ($(FLAVOR),release)
-    CFLAGS += -g -O2
-    LDFLAGS += -g -O2
+    CFLAGS += -O2
+    LDFLAGS += -O2
 endif
 
 ifeq ($(DEBUG), 1)
@@ -167,8 +160,8 @@ ifeq ($(MC_66B), 1)
 	CFLAGS += -DMC_66B -DEN61107
 endif
 
-ifeq ($(FORCED_FLOW_METER), 1)
-	CFLAGS += -DFORCED_FLOW_METER
+ifeq ($(FLOW_METER), 1)
+	CFLAGS += -DFLOW_METER
 endif
 
 ifeq ($(EN61107), 1)
@@ -182,6 +175,11 @@ else
     CFLAGS += -DKMP
     MODULES += user/kamstrup user/cron user/ac
     WIFI_SSID = "KAM_$(SERIAL)"
+endif
+
+ifeq ($(IMPULSE_DEV_BOARD), 1)
+    IMPULSE_DEV_BOARD = 1
+	CFLAGS += -DIMPULSE_DEV_BOARD
 endif
 
 ifneq ($(AUTO_CLOSE), 0)
@@ -206,10 +204,6 @@ endif
 
 ifeq ($(EXT_SPI_RAM_IS_NAND), 1)
     CFLAGS += -DEXT_SPI_RAM_IS_NAND
-endif
-
-ifeq ($(AP), 1)
-    CFLAGS += -DAP
 endif
 
 # various paths from the SDK used in this project
@@ -321,16 +315,20 @@ flash107th_bit_0xff:
 
 size:
 	$(SIZE) -A -t -d $(APP_AR) | tee $(BUILD_BASE)/../app_app.size
-	$(SIZE) -B -t -d $(APP_AR) | tee $(BUILD_BASE)/../app_app.size
+	$(SIZE) -B -t -d $(APP_AR) | tee -a $(BUILD_BASE)/../app_app.size
 
 getstacktrace:
 	$(ESPTOOL) -p $(ESPPORT) -b $(BAUDRATE) read_flash 0x80000 0x4000 firmware/stack_trace.dump
 	
 stacktracedecode:
-	test -s build/app.out || echo "Need to make all first" && exit
+	test -s $(TARGET_OUT) || echo "Need to make all first" && exit
 	test -s firmware/stack_trace.dump || echo "Need to make getstacktrace first" && exit
 	java -jar /meterlogger/EspStackTraceDecoder.jar /meterlogger/esp-open-sdk/xtensa-lx106-elf/bin/xtensa-lx106-elf-addr2line build/app.out firmware/stack_trace.dump
 
+objdump:
+	test -s $(TARGET_OUT) || echo "Need to make all first" && exit
+	$(OBJDUMP) -f -s -d --source $(TARGET_OUT) > $(TARGET).S
+	
 screen:
 	screen /dev/ttyUSB0 $(DEBUG_SPEED),cstopb
 minicom:
@@ -349,11 +347,13 @@ clean:
 	$(Q) rm -f $(FW_FILE_1)
 	$(Q) rm -f $(FW_FILE_2)
 	$(Q) rm -f app_app.size
+	$(Q) rm -f $(TARGET).S
 #	$(Q) rm -rf $(FW_BASE)
 
 foo:
 #	echo $(CFLAGS)
 #	@echo $(CUSTOM_KEY)
-	@echo $(CUSTOM_AP_PASSWORD)
+#	@echo $(CUSTOM_AP_PASSWORD)
+	@echo $(GIT_LWIP_VERSION)
 
 $(foreach bdir,$(BUILD_DIR),$(eval $(call compile-objects,$(bdir))))

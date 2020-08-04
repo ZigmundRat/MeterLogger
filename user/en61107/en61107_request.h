@@ -27,13 +27,13 @@ void en61107_register_meter_sent_data_cb(meter_sent_data_cb cb);
 ICACHE_FLASH_ATTR
 unsigned int en61107_get_received_serial();
 
-#ifdef FORCED_FLOW_METER
+#ifdef FLOW_METER
 ICACHE_FLASH_ATTR
-unsigned int en61107_get_received_volume_m3();
+unsigned int en61107_get_received_volume_l();
 #else
 ICACHE_FLASH_ATTR
 unsigned int en61107_get_received_energy_kwh();
-#endif	// FORCED_FLOW_METER
+#endif	// FLOW_METER
 
 //ICACHE_FLASH_ATTR
 inline bool en61107_is_eod_char(uint8_t c);
@@ -61,8 +61,8 @@ void en61107_uart_send_inst_values();
 
 
 // fifo
-ICACHE_FLASH_ATTR
-unsigned int en61107_fifo_in_use();
+//ICACHE_FLASH_ATTR
+inline unsigned int en61107_fifo_in_use();
 
 //ICACHE_FLASH_ATTR
 inline unsigned char en61107_fifo_put(unsigned char c);
@@ -73,6 +73,8 @@ unsigned char en61107_fifo_get(unsigned char *c);
 ICACHE_FLASH_ATTR
 unsigned char en61107_fifo_snoop(unsigned char *c, unsigned int pos);
 
+ICACHE_FLASH_ATTR
+void en61107_request_destroy();
 
 // private methods
 

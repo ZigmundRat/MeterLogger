@@ -10,6 +10,16 @@
 #define STACK_TRACE_N				0x4000
 #define STACK_TRACE_SEC				0x80
 
+#ifdef IMPULSE
+#ifndef FLOW_METER	// electricity meter
+#define IMPULSE_EDGE_TO_EDGE_TIME_MIN	(80)	// mS
+#define IMPULSE_EDGE_TO_EDGE_TIME_MAX	(120)	// mS
+#else				// analog water meter
+#define IMPULSE_EDGE_TO_EDGE_TIME_MIN	(0)	// dont use time filter for analog meters
+#define IMPULSE_EDGE_TO_EDGE_TIME_MAX	(0)	// dont use time filter for analog meters
+#endif	// FLOW_METER
+#endif	// IMPULSE
+
 //#define MQTT_SSL_ENABLE
 //#define CLIENT_SSL_ENABLE
 
@@ -41,21 +51,23 @@
 //#define DEFAULT_SECURITY	1		// 1 for ssl, 0 for none
 #define DEFAULT_SECURITY	0		// 1 for ssl, 0 for none
 
-#define MQTT_RECONNECT_TIMEOUT 	5	/*second*/
+#define MQTT_SEND_TIMOUT		5	/*second*/
+#define MQTT_RECONNECT_TIMEOUT	5	/*second*/
+#define MQTT_CONNECT_TIMEOUT	5	/*second*/
 
-#ifdef AP
 #ifdef DEBUG_NO_METER
-#define QUEUE_BUFFER_SIZE		 		4096
+#ifdef NO_CRON
+#define QUEUE_BUFFER_SIZE		 		12288
 #else
 #define QUEUE_BUFFER_SIZE		 		8192
+#endif	// NO_CRON
+#else
+#ifdef NO_CRON
+#define QUEUE_BUFFER_SIZE		 		16384
+#else
+#define QUEUE_BUFFER_SIZE		 		12288
+#endif	// NO_CRON
 #endif	// DEBUG_NO_METER
-#else
-#ifdef IMPULSE
-#define QUEUE_BUFFER_SIZE				20480	// larger queue for impulse meters
-#else
-#define QUEUE_BUFFER_SIZE				16384	// larger queue
-#endif	// IMPULSE
-#endif	// AP
 
 //#ifndef MQTT_SSL_SIZE
 //#define MQTT_SSL_SIZE					4096
@@ -76,7 +88,11 @@
 #define STA_FALLBACK_PASS	"w1reless"
 
 #ifdef IMPULSE
+#ifndef FLOW_METER
 #define AP_SSID				"EL_%s"
+#else
+#define AP_SSID				"WATER_%s"
+#endif	// FLOW_METER
 #else
 #define AP_SSID				"KAM_%07u"
 #endif
@@ -89,6 +105,9 @@
 #define AP_MESH_SSID		"mesh-%s"
 #define AP_MESH_PASS		"w1reless"
 #define AP_MESH_TYPE		AUTH_WPA_WPA2_PSK
+
+#define NTP_SERVER_1		"dk.pool.ntp.org"
+#define NTP_SERVER_2		"us.pool.ntp.org"
 
 #endif
 

@@ -14,7 +14,6 @@ Esp8266 http server - core routines
 
 #include <esp8266.h>
 // open lwip networking
-#ifdef AP
 #include <lwip/ip.h>
 #include <lwip/udp.h>
 #include <lwip/tcp_impl.h>
@@ -24,12 +23,10 @@ Esp8266 http server - core routines
 #include <lwip/dns.h>
 #include <lwip/app/dhcpserver.h>
 #include <lwip/opt.h>
-#else
-#include <ip_addr.h>
-#endif  // AP
 #include <espconn.h>
 
 #include "httpd.h"
+#include "cgiwifi.h"
 #include "espfs.h"
 #include "debug.h"
 #include "tinyprintf.h"
@@ -42,7 +39,7 @@ Esp8266 http server - core routines
 //Max post buffer len
 #define MAX_POST 1024
 //Max send buffer len
-#define MAX_SENDBUFF_LEN 2048
+#define MAX_SENDBUFF_LEN 4096
 
 
 //This gets set at init time.
@@ -311,7 +308,8 @@ static void httpdSentCb(void *arg) {
 	xmitSendBuff(conn);
 }
 
-static const char *httpNotFoundHeader="HTTP/1.0 404 Not Found\r\nServer: esp8266-httpd/0.1\r\nContent-Type: text/plain\r\n\r\nNot Found.\r\n";
+static const char *httpNotFoundHeader="HTTP/1.0 404 Not Found\r\nServer: esp8266-httpd/0.1\r\nContent-Type: text/plain\r\n\r\n 404 Not Found.\r\n";
+static const char *httpdServerErrorHeader="HTTP/1.0 500 Internal Server Error\r\nServer: esp8266-httpd/0.1\r\nContent-Type: text/plain\r\n\r\n500 Internal Server Error.\r\n";
 
 //This is called when the headers have been received and the connection is ready to send
 //the result headers and data.
@@ -319,6 +317,7 @@ ICACHE_FLASH_ATTR
 static void httpdSendResp(HttpdConnData *conn) {
 	int i=0;
 	int r;
+	
 	//See if the url is somewhere in our internal url table.
 	while (builtInUrls[i].url!=NULL && conn->url!=NULL) {
 		int match=0;
@@ -332,8 +331,16 @@ static void httpdSendResp(HttpdConnData *conn) {
 			conn->cgi=builtInUrls[i].cgiCb;
 			conn->cgiArg=builtInUrls[i].cgiArg;
 			r=conn->cgi(conn);
-			if (r!=HTTPD_CGI_NOTFOUND) {
+			if (r!=HTTPD_CGI_NOTFOUND && r!=HTTPD_CGI_SERVER_ERROR) {
 				if (r==HTTPD_CGI_DONE) conn->cgi=NULL;  //If cgi finishes immediately: mark conn for destruction.
+					return;
+			}
+			else if (r==HTTPD_CGI_SERVER_ERROR) {
+				//Server error
+				INFO("%s server error. 500!\n", conn->url);
+				conn->priv->sendBuffLen=0;
+				httpdSend(conn, httpdServerErrorHeader, -1);
+				conn->cgi=NULL; //mark for destruction
 				return;
 			}
 		}
@@ -403,7 +410,7 @@ static void httpdRecvCb(void *arg, char *data, unsigned short len) {
 	for (x=0; x<len; x++) {
 		if (conn->postLen<0) {
 			//This byte is a header byte.
-			if (conn->priv->headPos!=MAX_HEAD_LEN) conn->priv->head[conn->priv->headPos++]=data[x];
+			if (conn->priv->headPos<MAX_HEAD_LEN) conn->priv->head[conn->priv->headPos++]=data[x];
 			conn->priv->head[conn->priv->headPos]=0;
 			//Scan for /r/n/r/n
 			if (data[x]=='\n' && (char *)os_strstr(conn->priv->head, "\r\n\r\n")!=NULL) {
@@ -519,6 +526,8 @@ void httpdInit(HttpdBuiltInUrl *fixedUrls, int port) {
 	httpdTcp.local_port=port;
 	httpdConn.proto.tcp=&httpdTcp;
 	builtInUrls=fixedUrls;
+	
+	cgiWifiInit();
 
 	INFO("Httpd init, conn=%p\n", &httpdConn);
 	espconn_regist_connectcb(&httpdConn, httpdConnectCb);
@@ -532,13 +541,21 @@ void static httpdDisconnectTimerFunc(void *arg) {
 
 ICACHE_FLASH_ATTR
 void httpdStop() {
+	if (connPrivData == NULL) {
+		// allready stopped
+		return;
+	}
+
 	INFO("Httpd stopping, state=%d conn=%p\n", httpdConn.state, &httpdConn);
+	
+	cgiWifiDestroy();
 	
 	if (httpdConn.state != ESPCONN_NONE) {
 		if (espconn_delete(&httpdConn) == 0) {
 		    os_timer_disarm(&httpdDisconnectTimer);
 			httpdRetireConn(connData);
 			free(connPrivData);
+			connPrivData = NULL;
 			INFO("Httpd stopped\n");
 		}
 		else {

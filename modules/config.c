@@ -26,11 +26,9 @@ char config_save_timer_running;
 
 bool ICACHE_FLASH_ATTR
 cfg_save(uint16_t *calculated_crc, uint16_t *saved_crc) {
-#ifdef IMPULSE
+#if !defined(IMPULSE_DEV_BOARD) && (defined(IMPULSE) && !defined(DEBUG_NO_METER))	// use internal flash if built with DEBUG_NO_METER=1
 	uint32_t impulse_meter_count_temp;
-#endif // IMPULSE
 
-#if defined(IMPULSE) && !defined(DEBUG_NO_METER)	// use internal flash if built with DEBUG_NO_METER=1
 	do {
 		// try to save until sys_cfg.impulse_meter_count does not change
 		impulse_meter_count_temp = sys_cfg.impulse_meter_count;
@@ -88,7 +86,7 @@ void ICACHE_FLASH_ATTR
 cfg_load() {
 	// DEBUG: we suppose nothing else is touching sys_cfg while saving otherwise checksum becomes wrong
 	INFO("\r\nload ...\r\n");
-#if defined(IMPULSE) && !defined(DEBUG_NO_METER)	// use internal flash if built with DEBUG_NO_METER=1
+#if !defined(IMPULSE_DEV_BOARD) && (defined(IMPULSE) && !defined(DEBUG_NO_METER))	// use internal flash if built with DEBUG_NO_METER=1
 	ext_spi_flash_read((EXT_CFG_LOCATION + 2) * EXT_SPI_RAM_SEC_SIZE,
 				   (uint32 *)&saveFlag, sizeof(SAVE_FLAG));
 	if (saveFlag.flag == 0) {
@@ -113,11 +111,7 @@ cfg_load() {
 		tfp_snprintf(sys_cfg.sta_ssid, 64, "%s", STA_SSID);
 		tfp_snprintf(sys_cfg.sta_pwd, 64, "%s", STA_PASS);
 		sys_cfg.sta_type = STA_TYPE;
-#ifdef AP
 		sys_cfg.ap_enabled = true;
-#else
-		sys_cfg.ap_enabled = false;
-#endif
 		tfp_snprintf(sys_cfg.device_id, 16, MQTT_CLIENT_ID, system_get_chip_id());
 		tfp_snprintf(sys_cfg.mqtt_host, 64, "%s", MQTT_HOST);
 		sys_cfg.mqtt_port = MQTT_PORT;
@@ -131,9 +125,10 @@ cfg_load() {
 		sys_cfg.mqtt_keepalive = MQTT_KEEPALIVE;
 #ifdef IMPULSE
 		tfp_snprintf(sys_cfg.impulse_meter_serial, METER_SERIAL_LEN, DEFAULT_METER_SERIAL);
-		tfp_snprintf(sys_cfg.impulse_meter_energy, 2, "0");
-		tfp_snprintf(sys_cfg.impulses_per_kwh, 4, "100");
+		tfp_snprintf(sys_cfg.impulse_meter_units, 2, "0");
+		tfp_snprintf(sys_cfg.impulses_per_unit, 4, "100");
 		sys_cfg.impulse_meter_count = 0;
+		sys_cfg.operating_time = 0;
 #else
 		sys_cfg.ac_thermo_state = 0;
 		sys_cfg.offline_close_at = 0;

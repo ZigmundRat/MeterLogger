@@ -79,7 +79,7 @@ static void print_stack(uint32_t start, uint32_t end) {
 // Print exception info to console
 ICACHE_FLASH_ATTR
 static void print_reason() {
-	int i;
+	unsigned int i;
 	unsigned int r;
 	//register uint32_t sp asm("a1");
 	struct XTensa_exception_frame_s *reg = &saved_regs;
@@ -116,7 +116,7 @@ static void print_reason() {
 	for (i = 0; i < 16; i++) {
 		r = getaregval(i);
 #ifdef DEBUG
-		printf("r%02d: 0x%08x=%10d ", i, r, r);
+		printf("r%02u: 0x%08x=%10u ", i, r, r);
 #endif	// DEBUG
 		tfp_snprintf(stack_trace_buffer, STACK_TRACE_BUFFER_N, "r%02d: 0x%08x=%10d ", i, r, r);
 		stack_trace_append(stack_trace_buffer);
@@ -147,8 +147,8 @@ static void exception_handler(struct XTensa_exception_frame_s *frame) {
 	memcpy(&saved_regs, frame, 19*4);
 	// Credits go to Cesanta for this trick. A1 seems to be destroyed, but because it
 	// has a fixed offset from the address of the passed frame, we can recover it.
-	// saved_regs.a1=(uint32_t)frame+EXCEPTION_GDB_SP_OFFSET;
-	saved_regs.a1=(uint32_t)frame;
+	// saved_regs.a1 = (uint32_t)frame + EXCEPTION_GDB_SP_OFFSET;
+	saved_regs.a1 = (uint32_t)frame + 0x100;
 
 	ets_wdt_disable();
 	
@@ -168,10 +168,9 @@ static void exception_handler(struct XTensa_exception_frame_s *frame) {
 ICACHE_FLASH_ATTR
 void exception_handler_init() {
 	unsigned int i;
-	int exno[] = {EXCCAUSE_ILLEGAL, EXCCAUSE_SYSCALL, EXCCAUSE_INSTR_ERROR, EXCCAUSE_LOAD_STORE_ERROR,
-				  EXCCAUSE_DIVIDE_BY_ZERO, EXCCAUSE_UNALIGNED, EXCCAUSE_INSTR_DATA_ERROR, EXCCAUSE_LOAD_STORE_DATA_ERROR,
-				  EXCCAUSE_INSTR_ADDR_ERROR, EXCCAUSE_LOAD_STORE_ADDR_ERROR, EXCCAUSE_INSTR_PROHIBITED,
-				  EXCCAUSE_LOAD_PROHIBITED, EXCCAUSE_STORE_PROHIBITED};
+	int exno[] = {EXCCAUSE_ILLEGAL, EXCCAUSE_INSTR_ERROR, EXCCAUSE_DIVIDE_BY_ZERO, EXCCAUSE_UNALIGNED, 
+				  EXCCAUSE_INSTR_DATA_ERROR, EXCCAUSE_LOAD_STORE_DATA_ERROR, EXCCAUSE_INSTR_ADDR_ERROR, 
+				  EXCCAUSE_LOAD_STORE_ADDR_ERROR, EXCCAUSE_INSTR_PROHIBITED, EXCCAUSE_LOAD_PROHIBITED, EXCCAUSE_STORE_PROHIBITED};
 
 	// initialize buffered save log to flash
 	memset(stack_trace_buffer, 0, STACK_TRACE_BUFFER_N);

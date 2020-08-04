@@ -14,6 +14,8 @@ Cgi/template routines for the /wifi url.
 
 #include <esp8266.h>
 #include "httpd.h"
+#include "captdns.h"
+#include "led.h"
 #include "config.h"
 #include "debug.h"
 
@@ -26,8 +28,8 @@ Cgi/template routines for the /wifi url.
 //WiFi access point data
 typedef struct {
 	char ssid[32];
-	char rssi;
-	char enc;
+	sint8_t rssi;
+	AUTH_MODE enc;
 } ApData;
 
 //Scan result
@@ -115,26 +117,30 @@ int ICACHE_FLASH_ATTR cgiWiFiScan(HttpdConnData *connData) {
 
 	if (cgiWifiAps.scanInProgress==1) {
 		//We're still scanning. Tell Javascript code that.
-		tfp_snprintf(buff, 1024, "{\n \"result\": { \n\"inProgress\": \"1\"\n }\n}\n");
-		len = strlen(buff);
-		httpdSend(connData, buff, len);
+		len = tfp_snprintf(buff, 1024, "{\n \"result\": { \n\"inProgress\": \"1\"\n }\n}\n");
+		if (httpdSend(connData, buff, len) == 0) {
+			return HTTPD_CGI_SERVER_ERROR;
+		}
 	} else {
 		//We have a scan result. Pass it on.
-		tfp_snprintf(buff, 1024, "{\n \"result\": { \n\"inProgress\": \"0\", \n\"APs\": [\n");
-		len = strlen(buff);
-		httpdSend(connData, buff, len);
+		len = tfp_snprintf(buff, 1024, "{\n \"result\": { \n\"inProgress\": \"0\", \n\"APs\": [\n");
+		if (httpdSend(connData, buff, len) == 0) {
+			return HTTPD_CGI_SERVER_ERROR;
+		}
 		if (cgiWifiAps.apData==NULL) cgiWifiAps.noAps=0;
 		for (i=0; i<cgiWifiAps.noAps; i++) {
 			//Fill in json code for an access point
-			tfp_snprintf(buff, 1024, "{\"essid\": \"%s\", \"rssi\": \"%d\", \"enc\": \"%d\"}%s\n", 
+			len = tfp_snprintf(buff, 1024, "{\"essid\": \"%s\", \"rssi\": \"%d\", \"enc\": \"%d\"}%s\n", 
 					cgiWifiAps.apData[i]->ssid, cgiWifiAps.apData[i]->rssi, 
 					cgiWifiAps.apData[i]->enc, (i==cgiWifiAps.noAps-1)?"":",");
-			len = strlen(buff);
-			httpdSend(connData, buff, len);
+			if (httpdSend(connData, buff, len) == 0) {
+				return HTTPD_CGI_SERVER_ERROR;
+			}
 		}
-		tfp_snprintf(buff, 1024, "]\n}\n}\n");
-		len = strlen(buff);
-		httpdSend(connData, buff, len);
+		len = tfp_snprintf(buff, 1024, "]\n}\n}\n");
+		if (httpdSend(connData, buff, len) == 0) {
+			return HTTPD_CGI_SERVER_ERROR;
+		}
 		//Also start a new scan.
 		wifiStartScan();
 	}
@@ -152,11 +158,24 @@ static void ICACHE_FLASH_ATTR resetTimerCb(void *arg) {
 //	if (x==STATION_GOT_IP) {
 //		//Go to STA mode. This needs a reset, so do that.
 //		INFO("Got IP. Going into STA mode..\n");
+	if (cgiWifiAps.scanInProgress) {
+		// scanner still running, we wait for it to complete before restarting to avoid crash
+#ifdef DEBUG
+		os_printf("scanner still running, defering restart 1 second...\n");
+#endif
+		os_timer_disarm(&resetTimer);
+		os_timer_setfn(&resetTimer, resetTimerCb, NULL);
+		os_timer_arm(&resetTimer, 1000, 0);	// try again one second later
+		
+		return;
+	}
 #ifdef DEBUG
 	os_printf("restarting...\n");
 #endif
 //		wifi_set_opmode(1);
-	system_restart();
+	os_timer_disarm(&resetTimer);
+		
+	system_restart_defered();
 //	} else {
 //		INFO("Connect fail. Not going into STA-only mode.\n");
 //		//Maybe also pass this through on the webpage?
@@ -171,9 +190,9 @@ int ICACHE_FLASH_ATTR cgiSetup(HttpdConnData *connData) {
 	char mqtthost[64];
 #ifdef IMPULSE
 	char impulse_meter_serial[32 + 1];
-	char impulse_meter_energy_kw[32 + 1];
-	char impulse_meter_energy[32 + 1];
-	char impulses_per_kwh[8 + 1];
+	char impulse_meter_units_string[32 + 1];
+	char impulse_meter_units[32 + 1];
+	char impulses_per_unit[8 + 1];
 #endif
 	
 	if (connData->conn==NULL) {
@@ -186,8 +205,8 @@ int ICACHE_FLASH_ATTR cgiSetup(HttpdConnData *connData) {
 	httpdFindArg(connData->postBuff, "mqtthost", mqtthost, sizeof(mqtthost));
 #ifdef IMPULSE
 	httpdFindArg(connData->postBuff, "impulse_meter_serial", impulse_meter_serial, sizeof(impulse_meter_serial));
-	httpdFindArg(connData->postBuff, "impulse_meter_energy", impulse_meter_energy_kw, sizeof(impulse_meter_energy_kw));
-	httpdFindArg(connData->postBuff, "impulses_per_kwh", impulses_per_kwh, sizeof(impulses_per_kwh));
+	httpdFindArg(connData->postBuff, "impulse_meter_units", impulse_meter_units_string, sizeof(impulse_meter_units_string));
+	httpdFindArg(connData->postBuff, "impulses_per_unit", impulses_per_unit, sizeof(impulses_per_unit));
 #endif
 
 	os_strncpy((char*)sys_cfg.sta_ssid, essid, 32);
@@ -195,9 +214,9 @@ int ICACHE_FLASH_ATTR cgiSetup(HttpdConnData *connData) {
 	os_strncpy((char*)sys_cfg.mqtt_host, mqtthost, 64);
 #ifdef IMPULSE
 	os_strncpy((char*)sys_cfg.impulse_meter_serial, impulse_meter_serial, 32 + 1);
-	kw_to_w_str(impulse_meter_energy_kw, impulse_meter_energy);
-	os_strncpy((char*)sys_cfg.impulse_meter_energy, impulse_meter_energy, 32 + 1);
-	os_strncpy((char*)sys_cfg.impulses_per_kwh, impulses_per_kwh, 8 + 1);
+	kw_to_w_str(impulse_meter_units_string, impulse_meter_units);
+	os_strncpy((char*)sys_cfg.impulse_meter_units, impulse_meter_units, 32 + 1);
+	os_strncpy((char*)sys_cfg.impulses_per_unit, impulses_per_unit, 8 + 1);
 	sys_cfg.impulse_meter_count = 0;
 #endif
 
@@ -246,7 +265,7 @@ int ICACHE_FLASH_ATTR cgiWifiSetMode(HttpdConnData *connData) {
 void ICACHE_FLASH_ATTR tplSetup(HttpdConnData *connData, char *token, void **arg) {
 	char buff[1024];
 #ifdef IMPULSE
-	char impulse_meter_energy[32 + 1];
+	char impulse_meter_units[32 + 1];
 #endif // IMPULSE
 	int x;
 	//static struct station_config stconf;
@@ -283,14 +302,28 @@ void ICACHE_FLASH_ATTR tplSetup(HttpdConnData *connData, char *token, void **arg
 	else if (os_strcmp(token, "ImpulseMeterSerial") == 0) {
 		os_strcpy(buff, (char*)sys_cfg.impulse_meter_serial);
 	}
-	else if (os_strcmp(token, "ImpulseMeterEnergy") == 0) {
-		tfp_snprintf(impulse_meter_energy, 32 + 1, "%u", atoi(sys_cfg.impulse_meter_energy) + sys_cfg.impulse_meter_count * (1000 / atoi(sys_cfg.impulses_per_kwh)));
-		w_to_kw_str(impulse_meter_energy, buff);
+	else if (os_strcmp(token, "ImpulseMeterUnits") == 0) {
+		tfp_snprintf(impulse_meter_units, 32 + 1, "%u", atoi(sys_cfg.impulse_meter_units) + sys_cfg.impulse_meter_count * (1000 / atoi(sys_cfg.impulses_per_unit)));
+		divide_str_by_1000(impulse_meter_units, buff);
 	}
-	else if (os_strcmp(token, "ImpulsesPerKwh") == 0) {
-		os_strcpy(buff, (char*)sys_cfg.impulses_per_kwh);
+	else if (os_strcmp(token, "ImpulsesPerUnit") == 0) {
+		os_strcpy(buff, (char*)sys_cfg.impulses_per_unit);
 	}
 #endif
 
 	httpdSend(connData, buff, -1);
+}
+
+void ICACHE_FLASH_ATTR cgiWifiInit() {
+	memset(&cgiWifiAps, 0, sizeof(ScanResultData));
+	wifiStartScan();
+}
+
+void ICACHE_FLASH_ATTR cgiWifiDestroy() {
+	int n;
+	//Clear prev ap data if needed.
+	if (cgiWifiAps.apData!=NULL) {
+		for (n=0; n<cgiWifiAps.noAps; n++) os_free(cgiWifiAps.apData[n]);
+		os_free(cgiWifiAps.apData);
+	}
 }

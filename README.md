@@ -10,27 +10,27 @@ Check out the [WIKI](https://github.com/nabovarme/MeterLogger/wiki) for more det
 
 To build and flash for KMP type meter (Multical 601):  
 ```  
-KEY=ef500c9268cf749016d26d6cbfaaf7bf AP=1 make clean all flashall  
+KEY=ef500c9268cf749016d26d6cbfaaf7bf make clean all flashall  
 ```  
   
 To build and flash for en61107, sub type Multical 66 C:  
 ```  
-EN61107=1 KEY=ef500c9268cf749016d26d6cbfaaf7bf AP=1 make clean all flashall  
+EN61107=1 KEY=ef500c9268cf749016d26d6cbfaaf7bf make clean all flashall  
 ```  
   
 To build and flash for en61107, sub type Multical 66 B:  
 ```  
-MC_66B=1 KEY=ef500c9268cf749016d26d6cbfaaf7bf AP=1 make clean all flashall  
+MC_66B=1 KEY=ef500c9268cf749016d26d6cbfaaf7bf make clean all flashall  
 ```  
   
 To build and flash for KMP/en61107 type, forced as flow meter:  
 ```  
-FORCED_FLOW_METER=1 KEY=ef500c9268cf749016d26d6cbfaaf7bf AP=1 make clean all flashall  
+FLOW_METER=1 KEY=ef500c9268cf749016d26d6cbfaaf7bf make clean all flashall  
 ```  
   
 To build and flash for impulse based electricity meter:  
 ```  
-IMPULSE=1 KEY=ef500c9268cf749016d26d6cbfaaf7bf AP=1 make clean all flashall  
+IMPULSE=1 KEY=ef500c9268cf749016d26d6cbfaaf7bf make clean all flashall  
 ```  
   
 To configure wireless network:  
@@ -43,7 +43,10 @@ DEBUG=1
 enable serial debugging  
   
 DEBUG_NO_METER=1  
-dont wait for meter to answer  
+dont wait for meter to answer serial. Build for nodemcu board  
+  
+IMPULSE_DEV_BOARD=1  
+build for nodemcu board  
   
 DEBUG_SHORT_WEB_CONFIG_TIME=1  
 dont wait for web config  
@@ -60,7 +63,7 @@ meter type is en61107, sub type Multical 66 C
 MC_66B=1  
 meter type is en61107, sub type Multical 66 B  
   
-FORCED_FLOW_METER=1  
+FLOW_METER=1  
 meter is forced to run as a flow meter and close when volume is reached  
   
 AUTO_CLOSE=1  
@@ -140,9 +143,6 @@ cleartext message (null terminated)
 hmac sha256 key
 ```  
 
-AP=1
-enable wireless extender; wireless AP
-enables open source lwip and uses more memory so mqtt buffer is smaller when this option is set. 
 
 **MQTT format for messages sent _to_ meter**  
 
@@ -179,6 +179,7 @@ enables open source lwip and uses more memory so mqtt buffer is smaller when thi
 | /config/v2/9999999/[unix time]/save (only pulse meter) |                                                                                                     |
 | /config/v2/9999999/[unix time]/mem                     |                                                                                                     |
 | /config/v2/9999999/[unix time]/reset_reason            |                                                                                                     |
+| /config/v2/9999999/[unix time]/restart                 |                                                                                                     |
   
 **MQTT format for messages sent _from_ meter**  
 
