@@ -41,6 +41,7 @@ volatile bool wifi_scan_runnning = false;
 volatile sint8_t rssi = 31;	// set rssi to fail state at init time
 volatile bool get_rssi_running = false;
 volatile bool wifi_default_ok = false;
+volatile uint32_t wifi_default_status = REASON_UNSPECIFIED;
 volatile bool my_auto_connect = true;
 
 static netif_input_fn orig_input_ap;
@@ -187,7 +188,7 @@ static void ICACHE_FLASH_ATTR wifi_scan_timer_func(void *arg);
 static void ICACHE_FLASH_ATTR wifi_scan_timeout_timer_func(void *arg);
 
 void wifi_handle_event_cb(System_Event_t *evt) {
-	static uint8_t wifi_status;
+	uint8_t wifi_status;
 //	static uint8_t wifi_event;
 #ifdef DEBUG
 	uint8_t mac_str[20];
@@ -211,6 +212,7 @@ void wifi_handle_event_cb(System_Event_t *evt) {
 			// set default network status
 			if (strncmp((char *)&stationConf.ssid, sys_cfg.sta_ssid, sizeof(sys_cfg.sta_ssid)) == 0) {
 				wifi_default_ok = true;
+				wifi_default_status = evt->event_info.disconnected.reason;
 			}
 			break;
 		case EVENT_STAMODE_DISCONNECTED:
@@ -220,6 +222,7 @@ void wifi_handle_event_cb(System_Event_t *evt) {
 			// set default network status
 			if (strncmp((char *)&stationConf.ssid, sys_cfg.sta_ssid, sizeof(sys_cfg.sta_ssid)) == 0) {
 				wifi_default_ok = false;
+				wifi_default_status = evt->event_info.disconnected.reason;
 			}
 			if (my_auto_connect) {
 #ifdef DEBUG
@@ -247,6 +250,7 @@ void wifi_handle_event_cb(System_Event_t *evt) {
 #endif
 			if (strncmp((char *)&stationConf.ssid, sys_cfg.sta_ssid, sizeof(sys_cfg.sta_ssid)) == 0) {
 				wifi_default_ok = true;
+				wifi_default_status = evt->event_info.disconnected.reason;
 			}
 			// set ap_network_addr from uplink
 			sta_network_addr = evt->event_info.got_ip.ip;
@@ -256,7 +260,7 @@ void wifi_handle_event_cb(System_Event_t *evt) {
 			wifi_softap_ip_config();
 
 			wifi_station_set_auto_connect(0);	// disale auto connect, we handle reconnect with this event handler
-			wifi_station_set_reconnect_policy(0);
+			wifi_station_set_reconnect_policy(1);
 			wifi_cb(wifi_status);
 			break;
 		case EVENT_STAMODE_DHCP_TIMEOUT:
@@ -266,6 +270,7 @@ void wifi_handle_event_cb(System_Event_t *evt) {
 			// set default network status
 			if (strncmp((char *)&stationConf.ssid, sys_cfg.sta_ssid, sizeof(sys_cfg.sta_ssid)) == 0) {
 				wifi_default_ok = false;
+				wifi_default_status = evt->event_info.disconnected.reason;
 			}
 			if (my_auto_connect) {
 #ifdef DEBUG
@@ -373,7 +378,7 @@ void ICACHE_FLASH_ATTR wifi_scan_done_cb(void *arg, STATUS status) {
 //				printf("channel set to %d\n\r", channel);
 //#endif
 			}
-			if ((info != NULL) && (info->ssid != NULL) && (strncmp(info->ssid, STA_FALLBACK_SSID, sizeof(STA_FALLBACK_SSID)) == 0)) {
+			if ((info != NULL) && (info->ssid != NULL) && (strncmp(info->ssid, STA_FALLBACK_SSID, sizeof(info->ssid)) == 0)) {
 				wifi_fallback_present = true;
 			}
 //#ifdef DEBUG
@@ -618,8 +623,8 @@ sint8_t ICACHE_FLASH_ATTR wifi_get_rssi() {
 	return rssi;
 }
 
-bool ICACHE_FLASH_ATTR wifi_get_status() {
-	return wifi_default_ok;
+uint32_t ICACHE_FLASH_ATTR wifi_get_status() {
+	return wifi_default_status;
 }
 
 void ICACHE_FLASH_ATTR wifi_start_scan(uint32_t interval) {
